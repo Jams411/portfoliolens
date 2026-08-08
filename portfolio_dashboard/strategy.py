@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MomentumAnalysis:
-    """Outcome of the optional momentum module without placeholder results."""
+    """Outcome of the optional module on the core pipeline's aligned history."""
 
     available: bool
     observations_available: int
