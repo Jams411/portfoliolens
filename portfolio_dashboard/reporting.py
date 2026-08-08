@@ -13,21 +13,26 @@ def _pct(value: object) -> str:
 
 def research_summary(performance: dict[str, float], benchmark: dict[str, float], weights: pd.Series,
                      return_contrib: pd.Series, risk_contrib: pd.Series,
-                     strategy_metrics: dict[str, float], stress_summary: dict[str, object]) -> list[str]:
+                     strategy_metrics: dict[str, float] | None, stress_summary: dict[str, object]) -> list[str]:
     """Create careful, rules-based observations without investment advice."""
     excess = benchmark.get("Excess Return", float("nan"))
     comparison = "could not be compared with" if pd.isna(excess) else "exceeded" if excess > 0 else "trailed" if excess < 0 else "matched"
     effective = 1 / float((weights ** 2).sum())
     concentration = "concentrated" if weights.max() >= 0.5 or effective < max(1.5, len(weights) / 2) else "moderately diversified"
+    strategy_metrics = strategy_metrics or {}
     strat_excess = strategy_metrics.get("Total Return", float("nan")) - strategy_metrics.get("Buy & Hold Total Return", float("nan"))
-    strat_text = "could not be compared with" if pd.isna(strat_excess) else "outpaced" if strat_excess > 0 else "lagged" if strat_excess < 0 else "matched"
+    strat_text = "outpaced" if strat_excess > 0 else "lagged" if strat_excess < 0 else "matched"
     benchmark_amount = "an unavailable amount" if pd.isna(excess) else f"{abs(excess):.2%}"
-    strategy_amount = "an unavailable amount" if pd.isna(strat_excess) else f"{abs(strat_excess):.2%}"
+    strategy_observation = (
+        "The momentum strategy was unavailable for the selected period."
+        if pd.isna(strat_excess)
+        else f"The momentum strategy {strat_text} buy-and-hold by {abs(strat_excess):.2%}, after configured transaction costs."
+    )
     return [f"The portfolio {comparison} the benchmark by {benchmark_amount} over the selected period.",
             f"Annualized volatility was {_pct(performance.get('Annualized Volatility'))}; maximum drawdown was {_pct(performance.get('Maximum Drawdown'))}.",
             f"{risk_contrib.idxmax()} was the largest volatility contributor and {return_contrib.idxmax()} was the largest total-return contributor.",
             f"The weight profile appears {concentration}; its effective number of holdings is {effective:.2f}.",
-            f"The momentum strategy {strat_text} buy-and-hold by {strategy_amount}, after configured transaction costs.",
+            strategy_observation,
             f"The selected custom shock implies an estimated portfolio impact of {_pct(stress_summary.get('Estimated Portfolio Impact'))}."]
 
 def _table(frame: pd.DataFrame) -> str:
@@ -142,7 +147,8 @@ def generate_html_report(*, title: str, tickers: list[str], weights: pd.Series, 
                          summary: list[str], performance: pd.DataFrame, risk: pd.DataFrame,
                          benchmark: pd.DataFrame, attribution: pd.DataFrame, allocations: pd.DataFrame,
                          rebalancing: pd.DataFrame, rebalancing_method: str,
-                         strategy: pd.DataFrame, stress: pd.DataFrame,
+                         strategy: pd.DataFrame | None, stress: pd.DataFrame,
+                         strategy_status: str | None = None,
                          benchmark_ticker: str | None = None, risk_free_rate: float | None = None,
                          initial_value: float | None = None, health_score: float | None = None,
                          health_coverage: float | None = None, health_components: pd.DataFrame | None = None,
@@ -223,7 +229,8 @@ def generate_html_report(*, title: str, tickers: list[str], weights: pd.Series, 
                 (f"Rebalancing plan — {rebalancing_method}", _financial_table(rebalancing)),
                 ("Rebalancing policy comparison", _comparison_table(rebalancing_policies) if rebalancing_policies is not None else "<p>Policy comparison unavailable.</p>"),
                 ("Selected rebalancing history", _financial_table(rebalancing_history) if rebalancing_history is not None else "<p>Policy history unavailable.</p>"),
-                ("Momentum-strategy results", _metric_table(strategy)), ("Stress-test results", _financial_table(stress)),
+                ("Momentum-strategy results", _metric_table(strategy) if strategy is not None else f"<p>{escape(strategy_status or 'Momentum analysis unavailable.')}</p>"),
+                ("Stress-test results", _financial_table(stress)),
                 ("ETF universe research", _comparison_table(etf_research) if etf_research is not None else "<p>ETF research unavailable.</p>"),
                 ("Security candidate screen", _comparison_table(security_screen) if security_screen is not None else "<p>Security screen unavailable.</p>")]
     sections.extend(_fixed_income_report_sections(fixed_income))

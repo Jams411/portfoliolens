@@ -54,7 +54,7 @@ This application demonstrates:
 - A dedicated **Portfolio Strategies** workspace comparing rebalancing policies with SPX using active return, tracking error, information ratio, drawdown, turnover, costs, and downloadable histories
 - Like-for-like portfolio comparison, a fully disclosed historical Health Score, validated hypothetical weights/shocks, and metric-traceable deterministic insights
 - Dollar rebalancing plan with intuitive buy/sell signs and CSV export
-- Dual-moving-average long/cash strategy on the first requested holding, with one-day signal lag and transaction costs
+- Optional dual-moving-average long/cash strategy on the first requested holding, with one-day signal lag, transaction costs, and a minimum of 201 aligned price observations
 - Editable per-asset custom shocks and complete historical stress windows
 - Rules-based summary, six CSV exports and a self-contained HTML research report
 
@@ -151,6 +151,8 @@ Follow the complete [deployment and post-deployment checklist](docs/DEPLOYMENT.m
 ## Methodology and assumptions
 
 Daily simple returns and 252 trading days govern adjusted-price analytics. Bond analytics instead use explicit contractual cash flows, nominal annual YTM compounded at coupon frequency, settlement-aware accrued interest, dirty-price sensitivity, and parallel-shift full repricing. The two data models remain separate. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+
+Core portfolio analytics may run on shorter periods when their own aligned-history requirements are satisfied. Momentum separately requires at least 201 aligned price observations; when that strategy-specific requirement is not met, PortfolioLens keeps the core results and reports momentum as skipped rather than substituting empty or zero performance.
 
 ## Limitations and disclaimer
 

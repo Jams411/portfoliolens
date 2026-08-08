@@ -49,7 +49,7 @@ from portfolio_dashboard.risk import (
     historical_cvar, historical_var, security_single_index_table,
     single_index_regression_diagnostics,
 )
-from portfolio_dashboard.strategy import momentum_backtest
+from portfolio_dashboard.strategy import optional_momentum_analysis
 from portfolio_dashboard.stress import custom_shock, historical_stress
 
 st.set_page_config(page_title="PortfolioLens", page_icon=":material/analytics:", layout="wide")
@@ -769,6 +769,10 @@ with st.sidebar:
     with st.expander("Strategy settings", icon=":material/show_chart:"):
         short_window = st.number_input("Short moving average", 2, 500, 50, on_change=clear_analysis_state)
         long_window = st.number_input("Long moving average", 3, 1000, 200, on_change=clear_analysis_state)
+    if len(pd.bdate_range(start_input, end_input)) <= int(long_window):
+        st.caption(
+            f"Momentum strategies generally require at least {int(long_window) + 1} trading observations."
+        )
     with st.expander("About", icon=":material/info:"):
         st.caption("Historical investment research · not personalized financial advice")
         st.caption(f"Build `{build_identifier()}`")
@@ -791,14 +795,12 @@ if run:
             )
         weights = normalize_allocation(tickers, allocation_values)
         normalized = False
-        if short_window >= long_window:
-            raise ValueError("Short moving-average window must be below the long window.")
         with st.spinner("Downloading adjusted market history and running analytics…"):
             prices = cached_prices(tuple(tickers), start, end)
             benchmark_prices = cached_prices((benchmark_provider,), start, end)[benchmark_provider]
             analysis = run_analysis(prices, benchmark_prices, weights, risk_free)
             strategy_asset = tickers[0]
-            strategy_data, strategy_stats = momentum_backtest(
+            momentum = optional_momentum_analysis(
                 analysis.prices[strategy_asset], int(short_window), int(long_window), transaction_cost, risk_free
             )
             default_shocks = pd.Series(-0.10, index=tickers, dtype=float)
@@ -837,8 +839,8 @@ if run:
             "weights": weights,
             "requested_start": start, "requested_end": end, "initial_value": initial_value,
             "risk_free": risk_free, "transaction_cost": transaction_cost, "analysis": analysis,
-            "strategy_asset": strategy_asset, "strategy_data": strategy_data,
-            "strategy_stats": strategy_stats, "historical": historical, "plans": plans,
+            "strategy_asset": strategy_asset, "momentum": momentum,
+            "historical": historical, "plans": plans,
             "short_window": int(short_window), "long_window": int(long_window),
             "frontier": frontier, "frontier_weights": frontier_weights,
             "construction_stats": construction_stats, "cal": cal,
@@ -912,6 +914,7 @@ else:
     )
 st.session_state["analysis_tab"] = active_section
 st.session_state["_navigation_section"] = active_section
+analysis_notice_container = st.container()
 section_container = st.container(gap="small")
 
 if active_section == "Fixed Income":
@@ -941,8 +944,15 @@ if "result" not in st.session_state:
 
 r = st.session_state["result"]
 a = r["analysis"]
+momentum = r["momentum"]
 if r.get("benchmark_alias_notice"):
     st.info(r["benchmark_alias_notice"], icon=":material/swap_horiz:")
+if not momentum.available:
+    with analysis_notice_container:
+        if momentum.reason == "insufficient_history":
+            st.warning("Analysis completed. Momentum was skipped because the selected period is too short.")
+        else:
+            st.warning("Analysis completed, but momentum analysis could not run. See Strategies for details.")
 cvar95 = historical_cvar(a.portfolio_returns)
 allocation_comparison = portfolio_comparison(a.asset_returns, a.allocations, r["weights"], r["risk_free"])
 health_score, health_coverage, health_components = portfolio_health_score(
@@ -2115,26 +2125,35 @@ if active_section == "Portfolio Strategies & Momentum":
         st.divider()
         st.markdown("### Tactical momentum research")
         st.subheader(f"Dual-moving-average momentum · {r['strategy_asset']}")
-        first_evaluation = r["strategy_data"]["Strategy Growth"].first_valid_index()
-        st.caption(
-            f"The first portfolio ticker is the explicit strategy instrument. Signals lag one trading day. "
-            f"The shared strategy/buy-and-hold evaluation begins {first_evaluation.date()}."
-        )
-        stats = r["strategy_stats"]
-        with st.container(horizontal=True):
-            st.metric("Strategy return", pct(stats["Total Return"]), border=True)
-            st.metric("Buy & hold", pct(stats["Buy & Hold Total Return"]), border=True)
-            st.metric("Position changes", str(stats["Position Changes"]), border=True)
-            st.metric("Time in market", pct(stats["Time in Market"]), border=True)
-        line_chart(r["strategy_data"][["Price", "Short MA", "Long MA"]], "Price and moving averages", "Price")
-        line_chart(r["strategy_data"][["Strategy Growth", "Buy & Hold Growth"]], "Strategy versus buy-and-hold", "Growth of $1")
-        dd_compare = pd.concat([
-            drawdown_series(r["strategy_data"].loc[first_evaluation:, "Strategy Return"]).rename("Strategy"),
-            drawdown_series(r["strategy_data"].loc[first_evaluation:, "Buy & Hold Return"]).rename("Buy & hold"),
-        ], axis=1)
-        line_chart(dd_compare, "Drawdown comparison", "Drawdown")
-        st.dataframe(display_metric_frame(stats), width="stretch")
-        st.download_button("Download strategy results CSV", r["strategy_data"].to_csv(), "strategy_results.csv", "text/csv")
+        if not momentum.available:
+            st.warning(momentum.detail)
+            with st.container(horizontal=True):
+                st.metric("Available observations", str(momentum.observations_available), border=True)
+                st.metric("Required observations", str(momentum.observations_required), border=True)
+            st.markdown("**Suggested action:** Choose a start date at least approximately one trading year earlier.")
+        else:
+            strategy_data = momentum.data
+            stats = momentum.metrics
+            assert strategy_data is not None and stats is not None
+            first_evaluation = strategy_data["Strategy Growth"].first_valid_index()
+            st.caption(
+                f"The first portfolio ticker is the explicit strategy instrument. Signals lag one trading day. "
+                f"The shared strategy/buy-and-hold evaluation begins {first_evaluation.date()}."
+            )
+            with st.container(horizontal=True):
+                st.metric("Strategy return", pct(stats["Total Return"]), border=True)
+                st.metric("Buy & hold", pct(stats["Buy & Hold Total Return"]), border=True)
+                st.metric("Position changes", str(stats["Position Changes"]), border=True)
+                st.metric("Time in market", pct(stats["Time in Market"]), border=True)
+            line_chart(strategy_data[["Price", "Short MA", "Long MA"]], "Price and moving averages", "Price")
+            line_chart(strategy_data[["Strategy Growth", "Buy & Hold Growth"]], "Strategy versus buy-and-hold", "Growth of $1")
+            dd_compare = pd.concat([
+                drawdown_series(strategy_data.loc[first_evaluation:, "Strategy Return"]).rename("Strategy"),
+                drawdown_series(strategy_data.loc[first_evaluation:, "Buy & Hold Return"]).rename("Buy & hold"),
+            ], axis=1)
+            line_chart(dd_compare, "Drawdown comparison", "Drawdown")
+            st.dataframe(display_metric_frame(stats), width="stretch")
+            st.download_button("Download strategy results CSV", strategy_data.to_csv(), "strategy_results.csv", "text/csv")
 
 if active_section == "Stress Testing":
     with section_container:
@@ -2269,7 +2288,7 @@ if active_section == "Research Report":
         shock_table, shock_summary = custom_shock(r["weights"], current_shocks, r["initial_value"])
         summary = research_summary(
             a.performance, a.benchmark, r["weights"], a.return_contributions,
-            a.volatility_contributions, r["strategy_stats"], shock_summary,
+            a.volatility_contributions, momentum.metrics, shock_summary,
         )
         for item in summary:
             st.write("• " + item)
@@ -2332,7 +2351,8 @@ if active_section == "Research Report":
             performance=metric_frame(a.performance), risk=metric_frame(risk_values),
             benchmark=metric_frame(a.benchmark), attribution=attribution, allocations=a.allocations,
             rebalancing=r["plans"][selected_target], rebalancing_method=selected_target,
-            strategy=metric_frame(r["strategy_stats"]), stress=shock_table,
+            strategy=(metric_frame(momentum.metrics) if momentum.metrics is not None else None),
+            strategy_status=momentum.detail, stress=shock_table,
             benchmark_ticker=r["benchmark_ticker"], risk_free_rate=r["risk_free"],
             initial_value=r["initial_value"], health_score=health_score,
             health_coverage=health_coverage, health_components=health_components,

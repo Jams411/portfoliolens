@@ -2,10 +2,72 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import logging
+
 import numpy as np
 import pandas as pd
 
 from .performance import performance_metrics
+
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MomentumAnalysis:
+    """Outcome of the optional momentum module without placeholder results."""
+
+    available: bool
+    observations_available: int
+    observations_required: int
+    data: pd.DataFrame | None = None
+    metrics: dict[str, float] | None = None
+    reason: str | None = None
+    detail: str | None = None
+
+
+def optional_momentum_analysis(
+    prices: pd.Series,
+    short_window: int = 50,
+    long_window: int = 200,
+    transaction_cost: float = 0.001,
+    risk_free_rate: float = 0.0,
+) -> MomentumAnalysis:
+    """Run momentum when ready and isolate strategy-only failures from core analysis."""
+    observations = int(prices.dropna().shape[0])
+    required = int(long_window) + 1
+    if observations < required:
+        return MomentumAnalysis(
+            available=False,
+            observations_available=observations,
+            observations_required=required,
+            reason="insufficient_history",
+            detail=(
+                f"Momentum analysis was skipped because the selected period contains {observations} price "
+                f"observations. At least {required} observations are required. Choose an earlier start date "
+                "to enable this strategy."
+            ),
+        )
+    try:
+        data, metrics = momentum_backtest(
+            prices, short_window, long_window, transaction_cost, risk_free_rate
+        )
+    except Exception as exc:
+        LOGGER.exception("Momentum analysis failed after core analysis completed")
+        return MomentumAnalysis(
+            available=False,
+            observations_available=observations,
+            observations_required=required,
+            reason="calculation_error",
+            detail=f"Momentum analysis could not run: {exc}",
+        )
+    return MomentumAnalysis(
+        available=True,
+        observations_available=observations,
+        observations_required=required,
+        data=data,
+        metrics=metrics,
+    )
 
 
 def momentum_backtest(prices: pd.Series, short_window: int = 50, long_window: int = 200,

@@ -301,6 +301,52 @@ def test_portfolio_strategies_tab_exposes_policy_and_benchmark_comparison(offlin
     assert {"Download strategy history", "Download strategy trade log"} <= labels
 
 
+def test_short_history_renders_dashboard_and_explains_skipped_momentum(monkeypatch):
+    def short_prices(tickers, start, end):
+        index = pd.bdate_range("2026-04-01", periods=89)
+        x = np.arange(len(index))
+        return pd.DataFrame(
+            {
+                ticker: 100 * np.cumprod(1 + 0.0003 + 0.002 * np.sin(x / (11 + offset)))
+                for offset, ticker in enumerate(tickers)
+            },
+            index=index,
+        )
+
+    monkeypatch.setattr("portfolio_dashboard.data.download_prices", short_prices)
+    app = AppTest.from_file(APP_PATH).run(timeout=20)
+    widget(app.date_input, "Start date").set_value("2026-04-01")
+    widget(app.date_input, "End date").set_value("2026-08-08")
+    app.run(timeout=20)
+    assert any("at least 201 trading observations" in item.value for item in app.caption)
+
+    run_analysis(app)
+    assert not app.exception
+    assert "result" in app.session_state
+    momentum = app.session_state["result"]["momentum"]
+    assert not momentum.available
+    assert momentum.data is None and momentum.metrics is None
+    assert any("Analysis completed. Momentum was skipped" in item.value for item in app.warning)
+    assert not any("Analysis could not run" in item.value for item in app.error)
+    dashboard_html = "".join(item.proto.body for item in app.get("html"))
+    assert "Portfolio value" in dashboard_html
+    chart_titles = {
+        json.loads(item.proto.spec).get("layout", {}).get("title", {}).get("text", "")
+        for item in app.get("plotly_chart")
+    }
+    assert "Portfolio vs SPX" in chart_titles
+
+    app.session_state["analysis_tab"] = "Portfolio Strategies"
+    app.run(timeout=30)
+    assert not app.exception
+    assert any("contains 89 price observations" in item.value for item in app.warning)
+    metrics = {item.label: item.value for item in app.metric}
+    assert metrics["Available observations"] == "89"
+    assert metrics["Required observations"] == "201"
+    assert any("approximately one trading year earlier" in item.value for item in app.markdown)
+    assert not any(item.label == "Download strategy results CSV" for item in app.get("download_button"))
+
+
 def test_asset_allocation_tab_exposes_comparison_contributions_and_trades(offline_app):
     run_analysis(offline_app)
     offline_app.session_state["analysis_tab"] = "Asset Allocation"

@@ -45,7 +45,7 @@ from portfolio_dashboard.risk import (
     security_single_index_table, single_index_regression,
     single_index_regression_diagnostics, tracking_error, volatility_contributions,
 )
-from portfolio_dashboard.strategy import momentum_backtest
+from portfolio_dashboard.strategy import momentum_backtest, optional_momentum_analysis
 from portfolio_dashboard.stress import custom_shock, historical_stress
 from portfolio_dashboard.formatting import metric_value
 from portfolio_dashboard.reporting import generate_html_report, research_summary
@@ -223,6 +223,13 @@ def test_missing_data_policy():
     aligned = align_prices(prices, ["A", "B"], min_observations=2)
     assert len(aligned) == 2 and not aligned.isna().any().any()
     with pytest.raises(MarketDataError): align_prices(prices, ["A", "C"], min_observations=1)
+
+
+def test_core_history_minimum_remains_independent_of_momentum():
+    index = pd.bdate_range("2024-01-01", periods=29)
+    prices = pd.DataFrame({"A": np.arange(29.0), "B": np.arange(29.0)}, index=index)
+    with pytest.raises(MarketDataError, match="at least 30"):
+        align_prices(prices, ["A", "B"])
 
 def test_extract_single_and_multiindex_prices():
     raw = pd.DataFrame({"Adj Close": [10, 11], "Close": [9, 10]})
@@ -1098,6 +1105,55 @@ def test_strategy_rejects_insufficient_history():
     prices = pd.Series([10, 11, 12], index=pd.bdate_range("2024-01-01", periods=3))
     with pytest.raises(ValueError, match="requires more than 3"):
         momentum_backtest(prices, 2, 3)
+
+
+@pytest.mark.parametrize("observations", [89, 200])
+def test_optional_momentum_skips_without_fake_results(observations):
+    prices = pd.Series(
+        np.linspace(100, 120, observations),
+        index=pd.bdate_range("2024-01-01", periods=observations),
+    )
+    result = optional_momentum_analysis(prices)
+    assert not result.available
+    assert result.reason == "insufficient_history"
+    assert result.observations_available == observations
+    assert result.observations_required == 201
+    assert result.data is None
+    assert result.metrics is None
+    assert f"contains {observations} price observations" in result.detail
+
+
+def test_optional_momentum_runs_at_201_aligned_observations():
+    prices = pd.Series(
+        np.linspace(100, 120, 202),
+        index=pd.bdate_range("2024-01-01", periods=202),
+    )
+    prices.iloc[50] = np.nan
+    result = optional_momentum_analysis(prices)
+    assert result.available
+    assert result.observations_available == 201
+    assert result.observations_required == 201
+    assert result.data is not None
+    assert result.metrics is not None
+
+
+def test_optional_momentum_isolates_and_logs_unexpected_failure(monkeypatch, caplog):
+    prices = pd.Series(
+        np.linspace(100, 120, 201),
+        index=pd.bdate_range("2024-01-01", periods=201),
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("synthetic strategy failure")
+
+    monkeypatch.setattr("portfolio_dashboard.strategy.momentum_backtest", fail)
+    with caplog.at_level("ERROR"):
+        result = optional_momentum_analysis(prices)
+    assert not result.available
+    assert result.reason == "calculation_error"
+    assert result.data is None and result.metrics is None
+    assert "synthetic strategy failure" in result.detail
+    assert "Momentum analysis failed after core analysis completed" in caplog.text
 
 def test_custom_and_historical_stress():
     weights = pd.Series({"A": .6, "B": .4}); shocks = pd.Series({"A": -.2, "B": -.1})

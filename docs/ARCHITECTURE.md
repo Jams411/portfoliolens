@@ -246,11 +246,11 @@ pytest.ini                          local pytest configuration
 - **Owns:** Moving averages, readiness, signal, one-day-lagged position, turnover, proportional transaction cost, post-warm-up comparison, growth series, and strategy statistics.
 - **Does not own:** Parameter search, machine learning, portfolio-level execution, taxes, slippage beyond the configured cost, or live orders.
 - **Key inputs:** One price Series, short/long windows, proportional cost, and risk-free rate.
-- **Key outputs:** A detailed backtest DataFrame and metric dictionary.
+- **Key outputs:** An optional-module result containing either a detailed backtest DataFrame and metric dictionary or an explicit unavailable status, aligned observation counts, and reason. Missing results are represented as `None`, never fake performance.
 - **Important dependencies:** pandas, NumPy, and `performance_metrics`.
 - **Financial concepts:** Trend following, long/cash exposure, look-ahead avoidance, turnover, costs, time in market, and common-period comparison.
-- **Common failure modes:** Invalid windows, insufficient history, invalid transaction cost, no active days, or no losing active returns.
-- **How tested:** Exact signal shift, cost monotonicity, warm-up, position-change count, and insufficient-history rejection.
+- **Common failure modes:** Invalid windows, fewer than `long_window + 1` aligned observations, invalid transaction cost, no active days, or no losing active returns.
+- **How tested:** Exact signal shift, cost monotonicity, warm-up, position-change count, 200/201 observation boundaries, missing aligned observations, explicit unavailable results, and isolated unexpected failures.
 
 ### `stress.py` — custom and historical scenarios
 
@@ -297,7 +297,7 @@ pytest.ini                          local pytest configuration
 5. Before a run, the app displays a helpful message and stops; no market data are downloaded.
 6. When **Run analysis** is selected, inputs are parsed and validated before network access.
 7. Holding and benchmark histories are downloaded separately and cached.
-8. `run_analysis` creates core analytics; strategy, historical stress, and rebalancing plans are calculated beside it.
+8. `run_analysis` creates core analytics; optional momentum, historical stress, and rebalancing plans are calculated beside it. Momentum cannot invalidate an already successful core result.
 9. Results are stored in Streamlit session state.
 10. The navigation registry resolves one primary workspace and one active view; only that view renders.
 
@@ -315,13 +315,16 @@ flowchart TD
     Returns --> Performance["Performance scorecard"]
     Returns --> Risk["Risk, benchmark and attribution"]
     Returns --> Construction["Allocation methods"]
-    Core --> Strategy["First-ticker momentum backtest"]
+    Core --> Strategy{"At least long window + 1 aligned observations?"}
+    Strategy -->|Yes| Backtest["First-ticker momentum backtest"]
+    Strategy -->|No| Skipped["Explicit unavailable status"]
     Core --> Stress["Historical and custom stress"]
     Construction --> Rebalance["Target rebalancing plans"]
     Performance --> State["Session result"]
     Risk --> State
     Construction --> State
-    Strategy --> State
+    Backtest --> State
+    Skipped --> State
     Stress --> State
     Rebalance --> State
     State --> UI["Selected workspace view"]
@@ -421,9 +424,11 @@ Exports include performance, asset metrics, daily returns, portfolio comparison,
 - Catch these expected failures at the Streamlit boundary and show actionable errors.
 - Treat optional optimized allocations independently and return warnings instead of aborting deterministic methods.
 - Reject nonconverged optimizers rather than displaying their weights.
-- Reject insufficient strategy history rather than returning a silent all-cash result.
+- Keep the 30-observation aligned-history requirement for core market-data analysis independent from optional strategy requirements.
+- Require at least `long_window + 1` aligned observations for momentum (201 with defaults); otherwise return an explicit skipped result without a silent all-cash path, fake values, or a global failure.
+- Log and disclose unexpected momentum failures while retaining safely completed non-momentum results.
 - Require complete explicit shocks; never assume omitted holdings receive zero shock.
-- Allow unexpected programming errors to surface during development rather than hiding them with broad exception handling.
+- Allow unexpected programming errors to surface during development rather than hiding them with broad exception handling, except at an explicitly optional-module boundary where failures are logged and represented in the result.
 
 Known limitation: some domain functions still use `ValueError` or `RuntimeError`; more specific exception types are a planned engineering improvement.
 
