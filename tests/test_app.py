@@ -299,6 +299,8 @@ def test_portfolio_strategies_tab_exposes_policy_and_benchmark_comparison(offlin
     )
     labels = {item.label for item in offline_app.get("download_button")}
     assert {"Download strategy history", "Download strategy trade log"} <= labels
+    assert not any("Momentum analysis was skipped" in item.value for item in offline_app.warning)
+    assert any(item.label == "Download strategy results CSV" for item in offline_app.get("download_button"))
 
 
 def test_short_history_renders_dashboard_and_explains_skipped_momentum(monkeypatch):
@@ -326,7 +328,6 @@ def test_short_history_renders_dashboard_and_explains_skipped_momentum(monkeypat
     momentum = app.session_state["result"]["momentum"]
     assert not momentum.available
     assert momentum.data is None and momentum.metrics is None
-    assert any("Analysis completed. Momentum was skipped" in item.value for item in app.warning)
     assert not any("Analysis could not run" in item.value for item in app.error)
     dashboard_html = "".join(item.proto.body for item in app.get("html"))
     assert "Portfolio value" in dashboard_html
@@ -336,15 +337,38 @@ def test_short_history_renders_dashboard_and_explains_skipped_momentum(monkeypat
     }
     assert "Portfolio vs SPX" in chart_titles
 
+    non_strategy_sections = {
+        "Dashboard": "Dashboard",
+        "Analytics": "Performance",
+        "Research": "Security Analysis",
+        "Portfolio Construction": "Portfolio Optimization & Rebalancing",
+        "Reports": "Research Workspace",
+    }
+    for workspace, section in non_strategy_sections.items():
+        app.session_state["analysis_tab"] = section
+        app.run(timeout=30)
+        assert not app.exception, workspace
+        assert not any("Momentum analysis was skipped" in item.value for item in app.warning), workspace
+        assert not any("Analysis could not run" in item.value for item in app.error), workspace
+        assert app.session_state["result"]["momentum"].observations_available == 89
+
     app.session_state["analysis_tab"] = "Portfolio Strategies"
     app.run(timeout=30)
     assert not app.exception
-    assert any("contains 89 price observations" in item.value for item in app.warning)
+    assert any(
+        item.value == "Momentum analysis was skipped because the selected period is too short."
+        for item in app.warning
+    )
     metrics = {item.label: item.value for item in app.metric}
     assert metrics["Available observations"] == "89"
     assert metrics["Required observations"] == "201"
-    assert any("approximately one trading year earlier" in item.value for item in app.markdown)
+    assert any("Choose an earlier start date" in item.value for item in app.markdown)
     assert not any(item.label == "Download strategy results CSV" for item in app.get("download_button"))
+
+    app.session_state["analysis_tab"] = "Dashboard"
+    app.run(timeout=30)
+    assert not any("Momentum analysis was skipped" in item.value for item in app.warning)
+    assert app.session_state["result"]["momentum"].observations_available == 89
 
 
 def test_asset_allocation_tab_exposes_comparison_contributions_and_trades(offline_app):

@@ -914,7 +914,6 @@ else:
     )
 st.session_state["analysis_tab"] = active_section
 st.session_state["_navigation_section"] = active_section
-analysis_notice_container = st.container()
 section_container = st.container(gap="small")
 
 if active_section == "Fixed Income":
@@ -947,12 +946,6 @@ a = r["analysis"]
 momentum = r["momentum"]
 if r.get("benchmark_alias_notice"):
     st.info(r["benchmark_alias_notice"], icon=":material/swap_horiz:")
-if not momentum.available:
-    with analysis_notice_container:
-        if momentum.reason == "insufficient_history":
-            st.warning("Analysis completed. Momentum was skipped because the selected period is too short.")
-        else:
-            st.warning("Analysis completed, but momentum analysis could not run. See Strategies for details.")
 cvar95 = historical_cvar(a.portfolio_returns)
 allocation_comparison = portfolio_comparison(a.asset_returns, a.allocations, r["weights"], r["risk_free"])
 health_score, health_coverage, health_components = portfolio_health_score(
@@ -2126,11 +2119,14 @@ if active_section == "Portfolio Strategies & Momentum":
         st.markdown("### Tactical momentum research")
         st.subheader(f"Dual-moving-average momentum · {r['strategy_asset']}")
         if not momentum.available:
-            st.warning(momentum.detail)
+            st.warning(
+                "Momentum analysis was skipped because the selected period is too short."
+                if momentum.reason == "insufficient_history" else momentum.detail
+            )
             with st.container(horizontal=True):
                 st.metric("Available observations", str(momentum.observations_available), border=True)
                 st.metric("Required observations", str(momentum.observations_required), border=True)
-            st.markdown("**Suggested action:** Choose a start date at least approximately one trading year earlier.")
+            st.markdown("**Suggested action:** Choose an earlier start date.")
         else:
             strategy_data = momentum.data
             stats = momentum.metrics
