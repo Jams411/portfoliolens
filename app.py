@@ -2055,11 +2055,13 @@ if active_section == "Portfolio Strategies & Momentum":
     with section_container:
         st.subheader(active_section)
         st.caption(
-            f"Compare buy-and-hold and explicit rebalancing policies against {r['benchmark_ticker']} on one aligned history. "
+            f"Compare historical rebalancing simulations against {r['benchmark_ticker']} on one aligned history. "
             f"Initial value: {money(r['initial_value'])} · transaction-cost rate: {r['transaction_cost']:.2%} · "
             f"threshold band: {r['rebalancing_threshold']:.2%}."
         )
-        st.markdown("### Rebalancing-policy comparison")
+        st.markdown("### Rebalancing simulation")
+        st.write("Rebalancing restores your portfolio to its target allocation as market prices change.")
+        st.caption("Historical simulation — not actual trading history.")
         st.dataframe(
             r["policy_summary"], width="stretch",
             column_config={
@@ -2076,24 +2078,35 @@ if active_section == "Portfolio Strategies & Momentum":
                 "Rebalancing Dates": st.column_config.NumberColumn(format="%d"),
             },
         )
-        strategy_policies = list(r["policy_summary"].index)
+        st.caption("Buy and Hold is the historical simulation without periodic rebalancing.")
+        st.write(
+            "Compare how this portfolio would have performed historically if it had been rebalanced "
+            "to its target allocations monthly, quarterly, or annually."
+        )
+        rebalancing_frequencies = ["Monthly", "Quarterly", "Annual"]
         selected_strategy_policy = st.selectbox(
-            "Strategy policy", strategy_policies, index=strategy_policies.index("Quarterly"),
+            "Rebalancing frequency", rebalancing_frequencies,
+            index=rebalancing_frequencies.index("Quarterly"),
             key="strategy_policy_detail",
         )
         strategy_history = r["policy_histories"][selected_strategy_policy]
         strategy_trades = r["policy_trades"][selected_strategy_policy]
+        simulation_label = f"{selected_strategy_policy} rebalancing"
         aligned_strategy = pd.concat([
-            strategy_history["Daily Return"].rename(selected_strategy_policy),
+            strategy_history["Daily Return"].rename(simulation_label),
             a.benchmark_returns.rename(r["benchmark_ticker"]),
         ], axis=1).dropna()
         strategy_growth = (1 + aligned_strategy).cumprod() * r["initial_value"]
-        line_chart(strategy_growth, f"{selected_strategy_policy} versus {r['benchmark_ticker']}", "Portfolio value ($)")
+        line_chart(
+            strategy_growth,
+            f"{simulation_label} versus {r['benchmark_ticker']}",
+            "Simulated portfolio value ($)",
+        )
         strategy_drawdowns = pd.concat([
-            drawdown_series(aligned_strategy[selected_strategy_policy]).rename(selected_strategy_policy),
+            drawdown_series(aligned_strategy[simulation_label]).rename(simulation_label),
             drawdown_series(aligned_strategy[r["benchmark_ticker"]]).rename(r["benchmark_ticker"]),
         ], axis=1)
-        line_chart(strategy_drawdowns, "Strategy drawdown comparison", "Drawdown")
+        line_chart(strategy_drawdowns, "Rebalancing simulation drawdown", "Drawdown")
         selected_policy_stats = r["policy_summary"].loc[selected_strategy_policy]
         with st.container(horizontal=True):
             st.metric("Active return", pct(selected_policy_stats["Annualized Active Return"]), border=True)
@@ -2107,16 +2120,16 @@ if active_section == "Portfolio Strategies & Momentum":
         )
         with st.container(horizontal=True):
             st.download_button(
-                "Download strategy history", strategy_history.to_csv(),
-                f"{selected_strategy_policy.lower().replace(' ', '_')}_strategy_history.csv", "text/csv",
+                "Download simulated portfolio history", strategy_history.to_csv(),
+                f"{selected_strategy_policy.lower()}_rebalancing_simulation.csv", "text/csv",
             )
             st.download_button(
-                "Download strategy trade log", strategy_trades.to_csv(index=False),
-                f"{selected_strategy_policy.lower().replace(' ', '_')}_strategy_trades.csv", "text/csv",
+                "Download simulated rebalance log", strategy_trades.to_csv(index=False),
+                f"{selected_strategy_policy.lower()}_simulated_rebalance_log.csv", "text/csv",
             )
 
         st.divider()
-        st.markdown("### Tactical momentum research")
+        st.markdown("### Momentum strategy")
         st.subheader(f"Dual-moving-average momentum · {r['strategy_asset']}")
         if not momentum.available:
             st.warning(

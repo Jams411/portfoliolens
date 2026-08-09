@@ -288,7 +288,19 @@ def test_portfolio_strategies_tab_exposes_policy_and_benchmark_comparison(offlin
     offline_app.run(timeout=30)
     assert not offline_app.exception
     assert any(item.value == "Portfolio Strategies & Momentum" for item in offline_app.subheader)
-    assert any(item.label == "Strategy policy" for item in offline_app.selectbox)
+    frequency = widget(offline_app.selectbox, "Rebalancing frequency")
+    assert frequency.options == ["Monthly", "Quarterly", "Annual"]
+    assert not any(item.label == "Strategy policy" for item in offline_app.selectbox)
+    assert any("Rebalancing simulation" in item.value for item in offline_app.markdown)
+    assert any(
+        item.value == "Historical simulation — not actual trading history."
+        for item in offline_app.caption
+    )
+    assert any(
+        "Rebalancing restores your portfolio to its target allocation" in item.value
+        for item in offline_app.markdown
+    )
+    assert any("Momentum strategy" in item.value for item in offline_app.markdown)
     assert {"Active return", "Tracking error", "Information ratio", "Total turnover"} <= {
         item.label for item in offline_app.metric
     }
@@ -298,9 +310,51 @@ def test_portfolio_strategies_tab_exposes_policy_and_benchmark_comparison(offlin
         for item in offline_app.dataframe
     )
     labels = {item.label for item in offline_app.get("download_button")}
-    assert {"Download strategy history", "Download strategy trade log"} <= labels
+    assert {"Download simulated portfolio history", "Download simulated rebalance log"} <= labels
     assert not any("Momentum analysis was skipped" in item.value for item in offline_app.warning)
     assert any(item.label == "Download strategy results CSV" for item in offline_app.get("download_button"))
+
+
+def test_rebalancing_frequency_changes_underlying_simulated_chart_series(offline_app):
+    run_analysis(offline_app)
+    offline_app.session_state["analysis_tab"] = "Portfolio Strategies"
+    offline_app.run(timeout=30)
+
+    value_series = {}
+    drawdown_series_by_frequency = {}
+    for frequency in ("Monthly", "Quarterly", "Annual"):
+        widget(offline_app.selectbox, "Rebalancing frequency").set_value(frequency)
+        offline_app.run(timeout=30)
+        simulation_label = f"{frequency} rebalancing"
+        specifications = [
+            json.loads(item.proto.spec) for item in offline_app.get("plotly_chart")
+        ]
+        value_chart = next(
+            specification for specification in specifications
+            if specification.get("layout", {}).get("title", {}).get("text")
+            == f"{simulation_label} versus SPX"
+        )
+        drawdown_chart = next(
+            specification for specification in specifications
+            if specification.get("layout", {}).get("title", {}).get("text")
+            == "Rebalancing simulation drawdown"
+        )
+        value_trace = next(
+            trace for trace in value_chart["data"] if trace["name"] == simulation_label
+        )
+        drawdown_trace = next(
+            trace for trace in drawdown_chart["data"] if trace["name"] == simulation_label
+        )
+        value_series[frequency] = np.asarray(plotly_values(value_trace["y"]))
+        drawdown_series_by_frequency[frequency] = np.asarray(
+            plotly_values(drawdown_trace["y"])
+        )
+
+    for left, right in (("Monthly", "Quarterly"), ("Monthly", "Annual"), ("Quarterly", "Annual")):
+        assert not np.array_equal(value_series[left], value_series[right])
+        assert not np.array_equal(
+            drawdown_series_by_frequency[left], drawdown_series_by_frequency[right]
+        )
 
 
 def test_short_history_renders_dashboard_and_explains_skipped_momentum(monkeypatch):
