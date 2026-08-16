@@ -168,7 +168,7 @@ Clarity and financial correctness were prioritized over breadth. That choice led
 
 External methodology sources informed the roadmap around performance measurement, single-index benchmark research, rebalancing, transaction costs, warm-up periods, and overfitting controls. Source formulas were independently implemented and validated rather than copied or treated as verified production evidence.
 
-The project is separate from the frozen Portfolio Intelligence Platform. That platform was not inspected or modified during this showcase phase, and no claim is made here about its internal architecture. This repository intentionally remains the smaller, focused, interview-ready application.
+That platform was not inspected or modified during this showcase phase, and no claim is made here about its internal architecture. This repository intentionally remains the smaller, focused, interview-ready application.
 
 ### Benchmark symbols
 
